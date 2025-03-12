@@ -6,6 +6,29 @@
     :left="popoverLeft"
     :data="popoverData"
   ></Popover>
+  
+  <!-- 加载动画 -->
+  <div class="loading-container" v-if="isLoading">
+    <div class="loading-content">
+      <div class="loading-spinner">
+        <div class="spinner-circle"></div>
+        <div class="spinner-line-mask">
+          <div class="spinner-line"></div>
+        </div>
+        <div class="loading-percentage">{{ Math.floor(loadingPercentage) }}%</div>
+      </div>
+      <div class="loading-text">{{ loadingMessage }}</div>
+      <div class="loading-progress-bar">
+        <div class="progress-bar-fill" :style="{ width: loadingPercentage + '%' }"></div>
+      </div>
+      <div class="loading-details">正在加载模型资源...</div>
+    </div>
+    <div class="tech-decoration top-left"></div>
+    <div class="tech-decoration top-right"></div>
+    <div class="tech-decoration bottom-left"></div>
+    <div class="tech-decoration bottom-right"></div>
+  </div>
+  
   <div class="control-buttons">
     <!-- <button class="control-btn" @click="explodeModel">模型分解</button> -->
     <!-- <button class="control-btn" @click="increaseExplode" v-if="isExploded">增加分解</button> -->
@@ -16,7 +39,7 @@
 
 <script lang="ts" setup name="Sence">
 /* eslint-disable */
-import { ref, onMounted, type Ref } from 'vue';
+import { ref, onMounted, type Ref, computed } from 'vue';
 import Viewer, { type Animate } from '@/modules/Viewer';
 import Floors from '@/modules/Floors';
 import ModelLoader from '@/modules/ModelLoder';
@@ -28,6 +51,27 @@ import { checkNameIncludes, findParent } from '@/utils';
 
 // Import the component directly
 import Popover from './Popover/index.vue';
+
+// 加载状态和进度
+const isLoading = ref(true);
+const loadingPercentage = ref(0);
+const loadingStage = ref(0);
+const loadingStages = [
+  '初始化场景...',
+  '加载模型资源...',
+  '处理材质...',
+  '优化渲染...',
+  '准备完成...'
+];
+const loadingMessage = computed(() => {
+  return loadingStages[loadingStage.value];
+});
+
+// 模型加载相关变量
+const totalModelsToLoad = 2; // 总共需要加载的模型数量
+let loadedModels = 0;
+const modelUrls = ['/models/zuo.glb', '/models/plane.glb']; // 所有需要加载的模型URL
+const modelProgress = new Map<string, { loaded: number, total: number }>(); // 跟踪每个模型的加载进度
 
 let viewer: Viewer;
 let modelLoader: ModelLoader;
@@ -61,7 +105,95 @@ onMounted(() => {
   viewer.scene.traverse((item: THREE.Object3D) => {
     // console.log(item, '0000000000');
   });
+  
+  // 初始化加载进度
+  initLoadingProgress();
 });
+
+// 初始化加载进度
+const initLoadingProgress = () => {
+  // 初始进度为0
+  loadingPercentage.value = 0;
+  loadingStage.value = 0;
+  
+  // 阶段1: 初始化场景 (0-10%)
+  gsap.to(loadingPercentage, {
+    value: 10,
+    duration: 0.5,
+    ease: "power1.inOut",
+    onComplete: () => {
+      loadingStage.value = 1; // 进入"加载模型资源"阶段
+    }
+  });
+};
+
+// 更新加载进度
+const updateLoadingProgress = () => {
+  loadedModels++;
+  
+  // 如果所有模型都已加载，则隐藏加载动画
+  if (loadedModels >= totalModelsToLoad) {
+    loadingStage.value = 4; // 进入"准备完成"阶段
+    
+    // 确保进度到100%
+    gsap.to(loadingPercentage, {
+      value: 100,
+      duration: 0.5,
+      ease: "power1.out",
+      onComplete: () => {
+        // 然后淡出加载动画
+        setTimeout(() => {
+          isLoading.value = false;
+        }, 800);
+      }
+    });
+  }
+};
+
+// 处理模型加载进度
+const handleModelProgress = (url: string, loaded: number, total: number) => {
+  // 更新模型加载进度
+  modelProgress.set(url, { loaded, total });
+  
+  // 计算所有模型的总加载进度
+  let totalLoaded = 0;
+  let totalSize = 0;
+  
+  modelProgress.forEach(progress => {
+    totalLoaded += progress.loaded;
+    totalSize += progress.total;
+  });
+  
+  // 计算总体加载百分比 (10-90% 范围内)
+  const baseProgress = 10; // 初始化场景已经完成的进度
+  const maxProgress = 90; // 模型加载最多到90%，剩下的10%留给处理和优化
+  
+  // 只有当有总大小时才计算百分比
+  if (totalSize > 0) {
+    const modelLoadingPercentage = (totalLoaded / totalSize) * 100;
+    const scaledPercentage = baseProgress + (modelLoadingPercentage * (maxProgress - baseProgress) / 100);
+    
+    // 更新加载进度
+    gsap.to(loadingPercentage, {
+      value: scaledPercentage,
+      duration: 0.2,
+      ease: "power1.out"
+    });
+    
+    // 根据加载进度更新加载阶段
+    if (modelLoadingPercentage > 50 && loadingStage.value < 2) {
+      loadingStage.value = 2; // 进入"处理材质"阶段
+    }
+    
+    if (modelLoadingPercentage > 80 && loadingStage.value < 3) {
+      loadingStage.value = 3; // 进入"优化渲染"阶段
+    }
+    
+    // 输出调试信息
+    // console.log(`模型加载进度: ${url} - ${Math.floor(modelLoadingPercentage)}% (${loaded}/${total})`);
+    // console.log(`总体加载进度: ${Math.floor(scaledPercentage)}%`);
+  }
+};
 
 const init = () => {
   viewer = new Viewer('three');
@@ -70,6 +202,9 @@ const init = () => {
   viewer.initRaycaster();
 
   modelLoader = new ModelLoader(viewer);
+  // 设置加载进度回调
+  modelLoader.setProgressCallback(handleModelProgress);
+  
   // const floors = new Floors(viewer);
   // floors.addGird();
 
@@ -130,6 +265,9 @@ const initModel = () => {
     });
     viewer.setRaycasterObjects(list);
     
+    // 更新加载进度
+    updateLoadingProgress();
+    
     // Add camera transition after model is loaded
     transitionCameraToNewPosition();
   });
@@ -145,6 +283,9 @@ const initModel = () => {
     // console.log(texture, 'texture-------');
     const fnOnj = planeAnimate(texture);
     viewer.addAnimate(fnOnj);
+    
+    // 更新加载进度
+    updateLoadingProgress();
   });
 
 
@@ -549,7 +690,6 @@ const navigateToDatacenterScene = () => {
   // 发出自定义事件，App.vue 监听此事件来切换组件
   const event = new CustomEvent('navigate-to-datacenter');
   window.dispatchEvent(event);
-  console.log("已发出导航事件，显示数据中心场景");
 };
 
 // Add a function to reset the view when clicking elsewhere
@@ -1094,6 +1234,263 @@ const removeGlowEffect = () => {
 #three {
   height: 100%;
   width: 100%;
+}
+
+/* 加载动画样式 */
+.loading-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.9);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #00ffff;
+  position: relative;
+  z-index: 2;
+}
+
+.loading-spinner {
+  position: relative;
+  width: 150px;
+  height: 150px;
+  margin-bottom: 20px;
+}
+
+.spinner-circle {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border: 4px solid rgba(0, 255, 255, 0.1);
+  border-radius: 50%;
+  box-sizing: border-box;
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+}
+
+.spinner-line-mask {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  transform-origin: center;
+  mask-image: linear-gradient(0deg, rgba(0, 0, 0, 1) 50%, rgba(0, 0, 0, 0) 50%);
+  -webkit-mask-image: linear-gradient(0deg, rgba(0, 0, 0, 1) 50%, rgba(0, 0, 0, 0) 50%);
+  animation: rotate 2s linear infinite;
+}
+
+.spinner-line {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border: 4px solid transparent;
+  border-top-color: #00ffff;
+  border-left-color: #00ffff;
+  border-radius: 50%;
+  box-sizing: border-box;
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.7);
+}
+
+.loading-percentage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 24px;
+  font-weight: bold;
+  font-family: 'Orbitron', sans-serif;
+  text-shadow: 0 0 10px rgba(0, 255, 255, 0.7);
+}
+
+.loading-text {
+  font-size: 18px;
+  margin-top: 10px;
+  text-shadow: 0 0 10px rgba(0, 255, 255, 0.7);
+  letter-spacing: 2px;
+  animation: pulse 1.5s infinite;
+  margin-bottom: 15px;
+}
+
+.loading-progress-bar {
+  width: 300px;
+  height: 6px;
+  background-color: rgba(0, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+  margin-bottom: 15px;
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background-color: #00ffff;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  position: relative;
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.7);
+}
+
+.progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: shimmer 1.5s infinite;
+}
+
+.loading-details {
+  font-size: 14px;
+  color: rgba(0, 255, 255, 0.7);
+  margin-top: 5px;
+}
+
+/* 科技感网格背景 */
+.loading-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    linear-gradient(rgba(0, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
+  z-index: -1;
+  animation: gridMove 20s linear infinite;
+}
+
+/* 科技感装饰元素 */
+.tech-decoration {
+  position: absolute;
+  width: 150px;
+  height: 150px;
+  border: 2px solid rgba(0, 255, 255, 0.2);
+  z-index: 1;
+}
+
+.tech-decoration::before,
+.tech-decoration::after {
+  content: '';
+  position: absolute;
+  background-color: #00ffff;
+}
+
+.tech-decoration::before {
+  width: 30px;
+  height: 2px;
+}
+
+.tech-decoration::after {
+  width: 2px;
+  height: 30px;
+}
+
+.top-left {
+  top: 50px;
+  left: 50px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.top-left::before,
+.top-left::after {
+  top: 0;
+  left: 0;
+}
+
+.top-right {
+  top: 50px;
+  right: 50px;
+  border-left: none;
+  border-bottom: none;
+}
+
+.top-right::before,
+.top-right::after {
+  top: 0;
+  right: 0;
+}
+
+.top-right::before {
+  right: 0;
+}
+
+.bottom-left {
+  bottom: 50px;
+  left: 50px;
+  border-right: none;
+  border-top: none;
+}
+
+.bottom-left::before,
+.bottom-left::after {
+  bottom: 0;
+  left: 0;
+}
+
+.bottom-right {
+  bottom: 50px;
+  right: 50px;
+  border-left: none;
+  border-top: none;
+}
+
+.bottom-right::before,
+.bottom-right::after {
+  bottom: 0;
+  right: 0;
+}
+
+/* 动画 */
+@keyframes rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes gridMove {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 40px 40px;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 .control-buttons {

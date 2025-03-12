@@ -38,13 +38,11 @@ const currentView = ref('sence');
 // 监听自定义事件，切换到数据中心视图
 const handleNavigateToDatacenter = () => {
   currentView.value = 'sence2';
-  console.log('已切换到数据中心视图');
 };
 
 // 监听自定义事件，返回到办公楼视图
 const handleNavigateToOffice = () => {
   currentView.value = 'sence';
-  console.log('已返回到办公楼视图');
 };
 
 onMounted(() => {
